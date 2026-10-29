@@ -1,0 +1,146 @@
+{
+  "name": "ShopDesk — Lead & Support Triage",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-in",
+      "name": "Inbound Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-260, 0],
+      "webhookId": "lead-qual"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LEAD_AGENT_URL }}/triage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.WEBHOOK_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: $json.body.message, customer: $json.body.customer, email: $json.body.email }) }}",
+        "options": {}
+      },
+      "id": "triage-call",
+      "name": "Triage (Agent /triage)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.needs_human }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "needs-human",
+      "name": "Needs a human?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [180, 0]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": "#support-escalations",
+        "text": "=🚨 {{ $json.intent }} (score {{ $json.score }})\n> {{ $('Inbound Webhook').item.json.body.message }}\nDraft: {{ $json.reply_draft }}"
+      },
+      "id": "slack-escalate",
+      "name": "Escalate to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [420, -100]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "$GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "leads", "mode": "name" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": ["email"]
+        },
+        "options": {}
+      },
+      "id": "sheets-append",
+      "name": "Log to CRM (Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 8 * * 1" }] }
+      },
+      "id": "weekly-trigger",
+      "name": "Every Monday 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-260, 260]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LEAD_AGENT_URL }}/digest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.WEBHOOK_TOKEN }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "digest-call",
+      "name": "Fetch Weekly Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-40, 260]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": "#support-weekly",
+        "text": "={{ $json.data || $json }}"
+      },
+      "id": "slack-digest",
+      "name": "Post Digest to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [180, 260]
+    }
+  ],
+  "connections": {
+    "Inbound Webhook": { "main": [[{ "node": "Triage (Agent /triage)", "type": "main", "index": 0 }]] },
+    "Triage (Agent /triage)": { "main": [[{ "node": "Needs a human?", "type": "main", "index": 0 }]] },
+    "Needs a human?": {
+      "main": [
+        [{ "node": "Escalate to Slack", "type": "main", "index": 0 }],
+        [{ "node": "Log to CRM (Sheets)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Escalate to Slack": { "main": [[{ "node": "Log to CRM (Sheets)", "type": "main", "index": 0 }]] },
+    "Every Monday 08:00": { "main": [[{ "node": "Fetch Weekly Digest", "type": "main", "index": 0 }]] },
+    "Fetch Weekly Digest": { "main": [[{ "node": "Post Digest to Slack", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": false }
+}
